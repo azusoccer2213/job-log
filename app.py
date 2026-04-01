@@ -7,7 +7,6 @@ import os
 st.set_page_config(page_title="就活総合管理アプリ", layout="wide")
 
 # --- データ管理設定 ---
-# ページごとに異なるCSVファイルを使用し、データを分離する
 FILES = {
     "企業分析": "company_analysis.csv",
     "ES": "es_data.csv",
@@ -18,7 +17,7 @@ FILES = {
 COLUMNS = {
     "企業分析": ["更新日", "企業名", "業界", "志望度", "強み・魅力", "懸念点", "選考状況"],
     "ES": ["更新日", "企業名", "設問", "文字数制限", "回答案", "現在文字数", "提出期限"],
-    "自己分析": ["更新日", "項目（強み/弱み/経験など）", "具体的なエピソード", "面接でのアピール方法"],
+    "自己分析": ["更新日", "項目", "具体的なエピソード", "面接でのアピール方法"],
     "メモ": ["日付", "カテゴリ", "タイトル", "内容"]
 }
 
@@ -46,10 +45,8 @@ with st.sidebar:
 # ==========================================
 if menu == "① ホーム":
     st.title("🏠 ホーム・ダッシュボード")
-    st.write("各データの登録状況や、直近のタスクを確認します。")
     
-    col1, col2, col3 = st.columns(3)
-    
+    col1, col2 = st.columns(2)
     df_company = load_data("企業分析")
     df_es = load_data("ES")
     
@@ -57,9 +54,6 @@ if menu == "① ホーム":
         st.metric("登録企業数", f"{len(df_company)} 社")
     with col2:
         st.metric("作成中・提出済ES数", f"{len(df_es)} 件")
-    with col3:
-        # ESの提出期限が近いものをピックアップするなどの拡張用
-        st.metric("本日のタスク", "随時確認")
 
     st.markdown("---")
     st.subheader("📌 選考状況サマリー")
@@ -67,16 +61,16 @@ if menu == "① ホーム":
         status_counts = df_company["選考状況"].value_counts()
         st.bar_chart(status_counts)
     else:
-        st.info("企業分析ページから企業情報を登録すると、ここに選考状況のグラフが表示されます。")
+        st.info("企業情報が登録されていません。")
 
 # ==========================================
-# ② 企業分析ページ
+# ② 企業分析ページ（フィルター機能追加）
 # ==========================================
 elif menu == "② 企業分析":
     st.title("🏢 企業分析")
     df_company = load_data("企業分析")
 
-    with st.expander("➕ 新規企業の登録・分析", expanded=True):
+    with st.expander("➕ 新規企業の登録・分析", expanded=False): # デフォルトは閉じておく
         with st.form("company_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
@@ -94,25 +88,32 @@ elif menu == "② 企業分析":
                     new_row = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), company, industry, rank, pros, cons, status]], columns=COLUMNS["企業分析"])
                     df_company = pd.concat([df_company, new_row], ignore_index=True)
                     save_data("企業分析", df_company)
-                    st.success(f"{company} の情報を登録しました。")
+                    st.success(f"{company} を登録しました。")
                     st.rerun()
-                else:
-                    st.error("企業名は必須入力です。")
 
     st.subheader("📋 登録企業一覧")
     if not df_company.empty:
-        st.dataframe(df_company, use_container_width=True)
+        # ★追加：選考状況で表示を絞り込む機能
+        selected_status = st.multiselect(
+            "📌 選考状況で絞り込む", 
+            options=df_company["選考状況"].unique(),
+            default=df_company["選考状況"].unique() # 最初はすべて表示
+        )
+        filtered_df = df_company[df_company["選考状況"].isin(selected_status)]
+        
+        # hide_index=True で左端の不要な数字を消してスッキリ見せる
+        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
     else:
         st.info("データがありません。")
 
 # ==========================================
-# ③ ESページ（エントリーシート管理）
+# ③ ESページ（カード形式表示に変更）
 # ==========================================
 elif menu == "③ ESページ":
     st.title("📝 ES（エントリーシート）管理")
     df_es = load_data("ES")
 
-    with st.expander("➕ 新規ES設問の登録", expanded=True):
+    with st.expander("➕ 新規ES設問の登録", expanded=False):
         with st.form("es_form", clear_on_submit=True):
             company_es = st.text_input("企業名*")
             question = st.text_area("設問内容*")
@@ -121,7 +122,6 @@ elif menu == "③ ESページ":
                 limit = st.number_input("文字数制限", min_value=0, step=50, value=400)
             with col2:
                 deadline = st.date_input("提出期限")
-            
             answer = st.text_area("回答案", height=200)
             
             if st.form_submit_button("保存する"):
@@ -132,28 +132,31 @@ elif menu == "③ ESページ":
                     save_data("ES", df_es)
                     st.success("ESを保存しました。")
                     st.rerun()
-                else:
-                    st.error("企業名と設問内容は必須です。")
 
-    st.subheader("📋 ES一覧")
+    st.subheader("📖 保存済みのES一覧")
     if not df_es.empty:
-        st.dataframe(df_es, use_container_width=True)
+        # ★変更：表ではなく、開閉式のカードで表示して全文を読めるようにする
+        for i, row in df_es.iterrows():
+            with st.expander(f"🏢 {row['企業名']} | ⏳ 期限: {row['提出期限']} | ✏️ {row['現在文字数']}/{row['文字数制限']}字"):
+                st.markdown(f"**【設問】**\n{row['設問']}")
+                st.markdown("---")
+                # 読み取り専用のテキストエリアで表示（スクロールして全文読める）
+                st.text_area("【回答案】", row['回答案'], height=150, disabled=True, key=f"es_read_{i}")
     else:
         st.info("データがありません。")
 
 # ==========================================
-# ④ 自己分析ページ
+# ④ 自己分析ページ（カード形式表示に変更）
 # ==========================================
 elif menu == "④ 自己分析":
     st.title("🔍 自己分析")
-    st.write("研究活動で培った論理的思考力やデータ分析能力など、客観的な事実に基づいたエピソードを整理しましょう。")
     df_self = load_data("自己分析")
 
-    with st.expander("➕ 自己分析の追加", expanded=True):
+    with st.expander("➕ 自己分析の追加", expanded=False):
         with st.form("self_form", clear_on_submit=True):
             category = st.selectbox("項目", ["強み", "弱み", "学生時代に力を入れたこと(ガクチカ)", "研究内容", "志望動機の軸"])
-            episode = st.text_area("具体的なエピソード（STAR法などを意識して詳細に）", height=150)
-            appeal = st.text_area("面接でのアピール方法（企業にどう貢献できるか）")
+            episode = st.text_area("具体的なエピソード", height=150)
+            appeal = st.text_area("面接でのアピール方法")
             
             if st.form_submit_button("記録する"):
                 if episode:
@@ -162,23 +165,28 @@ elif menu == "④ 自己分析":
                     save_data("自己分析", df_self)
                     st.success("自己分析を記録しました。")
                     st.rerun()
-                else:
-                    st.error("エピソードを入力してください。")
 
-    st.subheader("📋 自己分析データ")
+    st.subheader("📖 自己分析エピソード一覧")
     if not df_self.empty:
-        st.dataframe(df_self, use_container_width=True)
+        # ★変更：カテゴリごとに見やすいカード形式
+        for i, row in df_self.iterrows():
+            with st.expander(f"🏷️ {row['項目']} （更新日: {row['更新日']}）"):
+                st.markdown("**【具体的なエピソード】**")
+                st.write(row['具体的なエピソード'])
+                st.markdown("---")
+                st.markdown("**【面接でのアピール方法】**")
+                st.write(row['面接でのアピール方法'])
     else:
         st.info("データがありません。")
 
 # ==========================================
-# ⑤ リクルート情報メモページ
+# ⑤ リクルート情報メモページ（カード形式表示に変更）
 # ==========================================
 elif menu == "⑤ リクルート情報メモ":
     st.title("📓 リクルート情報・メモ")
     df_memo = load_data("メモ")
 
-    with st.expander("➕ メモの追加", expanded=True):
+    with st.expander("➕ メモの追加", expanded=False):
         with st.form("memo_form", clear_on_submit=True):
             memo_date = st.date_input("日付", datetime.now())
             category_memo = st.selectbox("カテゴリ", ["エージェント面談", "OB/OG訪問", "イベント・合同説明会", "その他"])
@@ -192,11 +200,13 @@ elif menu == "⑤ リクルート情報メモ":
                     save_data("メモ", df_memo)
                     st.success("メモを保存しました。")
                     st.rerun()
-                else:
-                    st.error("タイトルを入力してください。")
 
-    st.subheader("📋 メモ一覧")
+    st.subheader("📖 メモ一覧")
     if not df_memo.empty:
-        st.dataframe(df_memo.iloc[::-1], use_container_width=True) # メモは新しい順に表示
+        # 新しい順に並び替えてから表示
+        df_memo_sorted = df_memo.sort_values(by="日付", ascending=False)
+        for i, row in df_memo_sorted.iterrows():
+            with st.expander(f"📅 {row['日付']} | 📂 {row['カテゴリ']} | {row['タイトル']}"):
+                st.write(row['内容'])
     else:
         st.info("データがありません。")
