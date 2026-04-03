@@ -14,9 +14,9 @@ FILES = {
     "メモ": "recruit_memo.csv"
 }
 
-# パスワードとIDを記録できるように列を追加
+# パスワードとIDを記録できるように列を追加 (企業分析にも追加)
 COLUMNS = {
-    "企業分析": ["更新日", "企業名", "業界", "志望度", "強み・魅力", "懸念点", "選考状況"],
+    "企業分析": ["更新日", "企業名", "業界", "志望度", "強み・魅力", "懸念点", "選考状況", "ID_メールアドレス", "パスワード"],
     "ES": ["更新日", "企業名", "設問", "文字数制限", "回答案", "現在文字数", "提出期限"],
     "自己分析": ["更新日", "項目", "具体的なエピソード", "面接でのアピール方法"],
     "メモ": ["日付", "カテゴリ", "タイトル", "ID_メールアドレス", "パスワード", "内容"]
@@ -30,6 +30,8 @@ def load_data(key):
         for col in COLUMNS[key]:
             if col not in df.columns:
                 df[col] = ""
+        # 欠損値を空文字で埋めておく（表示時のNaNを防ぐため）
+        df = df.fillna("")
         return df[COLUMNS[key]] # 列順を整理して返す
     else:
         return pd.DataFrame(columns=COLUMNS[key])
@@ -90,23 +92,65 @@ if menu == "① ホーム":
                 st.info(f"🔹 **{row['日付']}** | [{row['カテゴリ']}] {row['タイトル']}")
 
 # ==========================================
-# ② 企業分析 / ③ ES / ④ 自己分析 (変更なしのため省略不可・一括提示)
+# ② 企業分析
 # ==========================================
 elif menu == "② 企業分析":
     st.title("🏢 企業分析")
+    st.warning("⚠️ パスワードはこのアプリ内に平文で保存されます。取り扱いには十分注意してください。")
     df_company = load_data("企業分析")
+    
     with st.expander("➕ 新規企業の登録", expanded=False):
         with st.form("company_form", clear_on_submit=True):
             company = st.text_input("企業名*")
             industry = st.selectbox("業界", ["メーカー", "IT・通信", "商社", "金融", "コンサル", "インフラ", "その他"])
             status = st.selectbox("選考状況", ["興味あり", "説明会待ち", "ES提出済", "面接(1次)", "面接(2次)", "最終面接", "内定", "お見送り"])
-            if st.form_submit_button("登録"):
-                new_row = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), company, industry, 3, "", "", status]], columns=COLUMNS["企業分析"])
-                df_company = pd.concat([df_company, new_row], ignore_index=True)
-                save_data("企業分析", df_company)
-                st.rerun()
-    st.dataframe(df_company, use_container_width=True, hide_index=True)
+            
+            # --- アカウント情報入力欄 ---
+            st.markdown("##### アカウント情報 (任意)")
+            col_acc1, col_acc2 = st.columns(2)
+            with col_acc1:
+                login_id = st.text_input("マイページID / メールアドレス")
+            with col_acc2:
+                password = st.text_input("パスワード", type="password")
 
+            if st.form_submit_button("登録"):
+                if company:
+                    new_row = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), company, industry, 3, "", "", status, login_id, password]], columns=COLUMNS["企業分析"])
+                    df_company = pd.concat([df_company, new_row], ignore_index=True)
+                    save_data("企業分析", df_company)
+                    st.success("企業情報を登録しました。")
+                    st.rerun()
+                else:
+                    st.error("企業名を入力してください。")
+    
+    st.markdown("### 登録企業一覧")
+    if not df_company.empty:
+        # パスワード一覧がそのまま見えてしまうのを防ぐため、エキスパンダーで詳細を表示する形式に変更
+        for i, row in df_company.iterrows():
+            with st.expander(f"🏢 {row['企業名']} | 業界: {row['業界']} | 状況: {row['選考状況']}"):
+                st.write(f"**更新日:** {row['更新日']}")
+                
+                # アカウント情報の表示
+                if row['ID_メールアドレス'] or row['パスワード']:
+                    st.markdown("---")
+                    st.markdown("**🔐 マイページ・アカウント情報**")
+                    st.code(f"ID: {row['ID_メールアドレス']}\nPASS: {row['パスワード']}", language="text")
+                
+                # 企業分析のテキストエリアを編集可能にするか、表示のみにする（今回は表示のみ・後で拡張しやすいように構造化）
+                st.markdown("---")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.markdown("**強み・魅力**")
+                    st.write(row['強み・魅力'] if row['強み・魅力'] else "未記入")
+                with col_b:
+                    st.markdown("**懸念点**")
+                    st.write(row['懸念点'] if row['懸念点'] else "未記入")
+    else:
+        st.info("登録されている企業がありません。")
+
+# ==========================================
+# ③ ESページ
+# ==========================================
 elif menu == "③ ESページ":
     st.title("📝 ES管理")
     df_es = load_data("ES")
@@ -117,15 +161,22 @@ elif menu == "③ ESページ":
             dl = st.date_input("期限")
             ans = st.text_area("回答案")
             if st.form_submit_button("保存"):
-                new_row = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), co, q, 400, ans, len(ans), dl]], columns=COLUMNS["ES"])
-                df_es = pd.concat([df_es, new_row], ignore_index=True)
-                save_data("ES", df_es)
-                st.rerun()
+                if co and q:
+                    new_row = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), co, q, 400, ans, len(ans), dl]], columns=COLUMNS["ES"])
+                    df_es = pd.concat([df_es, new_row], ignore_index=True)
+                    save_data("ES", df_es)
+                    st.rerun()
+                else:
+                    st.error("企業名と設問を入力してください。")
+                    
     for i, row in df_es.iterrows():
         with st.expander(f"{row['企業名']} ({row['提出期限']})"):
             st.write(row['設問'])
             st.text_area("回答", row['回答案'], disabled=True, key=f"es_{i}")
 
+# ==========================================
+# ④ 自己分析
+# ==========================================
 elif menu == "④ 自己分析":
     st.title("🔍 自己分析")
     df_self = load_data("自己分析")
@@ -134,15 +185,20 @@ elif menu == "④ 自己分析":
             cat = st.selectbox("項目", ["強み", "研究内容", "ガクチカ"])
             epi = st.text_area("エピソード")
             if st.form_submit_button("保存"):
-                new_row = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), cat, epi, ""]], columns=COLUMNS["自己分析"])
-                df_self = pd.concat([df_self, new_row], ignore_index=True)
-                save_data("自己分析", df_self)
-                st.rerun()
+                if epi:
+                    new_row = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), cat, epi, ""]], columns=COLUMNS["自己分析"])
+                    df_self = pd.concat([df_self, new_row], ignore_index=True)
+                    save_data("自己分析", df_self)
+                    st.rerun()
+                else:
+                    st.error("エピソードを入力してください。")
+                    
     for i, row in df_self.iterrows():
-        with st.expander(row['項目']): st.write(row['具体的なエピソード'])
+        with st.expander(row['項目']): 
+            st.write(row['具体的なエピソード'])
 
 # ==========================================
-# ⑤ リクルート情報メモページ（ID・パスワード項目追加）
+# ⑤ リクルート情報メモページ
 # ==========================================
 elif menu == "⑤ リクルート情報メモ":
     st.title("📓 リクルート情報・メモ")
@@ -160,7 +216,6 @@ elif menu == "⑤ リクルート情報メモ":
             with col_acc1:
                 login_id = st.text_input("ID / メールアドレス")
             with col_acc2:
-                # type="password" にすることで入力中に伏せ字になります
                 password = st.text_input("パスワード", type="password", help="保存後はカード内で確認できます")
             
             content = st.text_area("内容・メモ（URLなど）", height=150)
@@ -179,7 +234,6 @@ elif menu == "⑤ リクルート情報メモ":
     if not df_memo.empty:
         df_memo_sorted = df_memo.sort_values(by="日付", ascending=False)
         for i, row in df_memo_sorted.iterrows():
-            # タイトルにカテゴリを表示して見やすく
             with st.expander(f"📅 {row['日付']} | 📂 {row['カテゴリ']} | {row['タイトル']}"):
                 # アカウント情報の表示
                 if row['ID_メールアドレス'] or row['パスワード']:
